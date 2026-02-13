@@ -3,26 +3,98 @@ import { useFrame, useLoader } from '@react-three/fiber';
 import { TextureLoader } from 'three';
 import * as THREE from 'three';
 
+import { City } from '../types';
+
 interface MarioEarthProps {
   reliefScale: number;
   isRotating: boolean;
   isResetting: boolean;
-  onCityClick: (pos: THREE.Vector3) => void;
+  onCityClick: (city: City, pos: THREE.Vector3) => void;
   windmillRotation?: [number, number, number];
 }
-// ... (rest of the file until sphereArgs)
 
-interface City {
-  name: string;
-  lat: number;
-  lng: number;
-  type: 'eiffel' | 'windmill' | 'parthenon';
-}
 
 const CITIES: City[] = [
-  { name: 'Paris', lat: 48.8566, lng: 2.3522, type: 'eiffel' },
-  { name: 'Amsterdam', lat: 52.3676, lng: 4.9041, type: 'windmill' },
-  { name: 'Athènes', lat: 37.9838, lng: 23.7275, type: 'parthenon' },
+  {
+    name: 'France',
+    lat: 48.8566,
+    lng: 2.3522,
+    type: 'eiffel',
+    description: "La France, pays de l'amour, de la gastronomie et de l'art de vivre.",
+    images: [
+      "photos/paris1.jpg"
+    ]
+  },
+  {
+    name: 'Pays-Bas',
+    lat: 52.3676,
+    lng: 4.9041,
+    type: 'windmill',
+    description: "Where we first met",
+    images: [
+      "photos/amsterdam1.JPEG"
+    ]
+  },
+  {
+    name: 'Grèce',
+    lat: 37.9838,
+    lng: 22.2275,
+    type: 'parthenon',
+    description: "",
+    images: [
+      "photos/greece1.JPEG",
+      "photos/greece2.JPG",
+      "photos/greece3.JPEG"
+    ]
+  },
+  {
+    name: 'Royaume-Uni',
+    lat: 51.5074,
+    lng: -0.1278,
+    type: 'bigben',
+    description: "Le Royaume-Uni, une terre de traditions royales et de modernité vibrante.",
+    images: [] // TODO: Add London photos
+  },
+  {
+    name: 'Italie',
+    lat: 41.9028,
+    lng: 12.4964,
+    type: 'generic',
+    description: "L'Italie, où l'histoire se mêle à la dolce vita.",
+    images: [] // TODO: Add Rome photos
+  },
+  {
+    name: 'Finlande',
+    lat: 60.1699,
+    lng: 24.9384,
+    type: 'generic',
+    description: "La Finlande, un bijou nordique entre mer et design.",
+    images: [] // TODO: Add Helsinki photos
+  },
+  {
+    name: 'Égypte',
+    lat: 30.0444,
+    lng: 31.2357,
+    type: 'pyramid',
+    description: "L'Égypte, terre des pharaons et des pyramides millénaires.",
+    images: [] // TODO: Add Cairo photos
+  },
+  {
+    name: 'Croatie',
+    lat: 45.8150,
+    lng: 15.9819,
+    type: 'generic',
+    description: "La Croatie, un pays plein de charme et d'histoire austro-hongroise.",
+    images: [] // TODO: Add Zagreb photos
+  },
+  {
+    name: 'Espagne',
+    lat: 40.4168,
+    lng: -3.7038, // Coordinates for Madrid
+    type: 'generic',
+    description: "L'Espagne, le cœur vibrant de la péninsule ibérique, entre tapas et flamenco.",
+    images: [] // TODO: Add Spain photos
+  },
 ];
 
 const latLngToVector3 = (lat: number, lng: number, radius: number) => {
@@ -36,7 +108,7 @@ const latLngToVector3 = (lat: number, lng: number, radius: number) => {
   );
 };
 
-import { useGLTF } from '@react-three/drei';
+import { useGLTF, Image } from '@react-three/drei';
 import { OBJLoader } from 'three-stdlib';
 
 const EiffelTower = () => {
@@ -80,6 +152,38 @@ const Parthenon = () => {
       <primitive
         object={clonedScene}
         scale={0.1}
+        position={[0, 0, -0.07]}
+        castShadow
+      />
+    </group>
+  );
+};
+
+const BigBen = () => {
+  const { scene } = useGLTF('/clock_tower_big_ben.glb');
+  const clonedScene = useMemo(() => scene.clone(), [scene]);
+
+  return (
+    <group rotation={[0, 0, 0]}>
+      <primitive
+        object={clonedScene}
+        scale={0.000016}
+        position={[0, 0.045, -0.075]}
+        castShadow
+      />
+    </group>
+  );
+};
+
+const GizaPyramid = () => {
+  const { scene } = useGLTF('/giza_pyramid_low-poly.glb');
+  const clonedScene = useMemo(() => scene.clone(), [scene]);
+
+  return (
+    <group rotation={[0, 0, 0]}>
+      <primitive
+        object={clonedScene}
+        scale={0.0004}
         position={[0, 0, 0]}
         castShadow
       />
@@ -87,7 +191,7 @@ const Parthenon = () => {
   );
 };
 
-const LightBeacon = ({ visible }: { visible: boolean }) => {
+const LightBeacon = ({ visible, color, coreColor }: { visible: boolean, color: string, coreColor: string }) => {
   const meshRef = useRef<THREE.Group>(null);
   const coreRef = useRef<THREE.Mesh>(null);
   const glowRef = useRef<THREE.Mesh>(null);
@@ -107,9 +211,13 @@ const LightBeacon = ({ visible }: { visible: boolean }) => {
       coreMat.opacity = THREE.MathUtils.lerp(coreMat.opacity, targetOpacity, delta * 3);
       glowMat.opacity = THREE.MathUtils.lerp(glowMat.opacity, targetOpacity * 0.2, delta * 3);
 
+      coreMat.color.set(coreColor);
+      glowMat.color.set(color);
+
       // Animate Light Intensity
       const targetIntensity = visible ? 0.1 : 0;
       lightRef.current.intensity = THREE.MathUtils.lerp(lightRef.current.intensity, targetIntensity, delta * 3);
+      lightRef.current.color.set(color);
 
       // Hide completely if tiny to save GPU
       meshRef.current.visible = meshRef.current.scale.y > 0.01;
@@ -119,18 +227,18 @@ const LightBeacon = ({ visible }: { visible: boolean }) => {
   return (
     <group ref={meshRef} position={[0, 0, 0]}>
       {/* Light Source at base */}
-      <pointLight ref={lightRef} distance={0.5} decay={2} color="#00ffff" intensity={0} position={[0, 0.05, 0]} />
+      <pointLight ref={lightRef} distance={0.5} decay={2} color={color} intensity={0} position={[0, 0.05, 0]} />
 
       {/* Core Beam (Bright) */}
       <mesh ref={coreRef} position={[0, 0.75, 0]}>
         <cylinderGeometry args={[0.002, 0.002, 1.5, 8]} />
-        <meshBasicMaterial color="#ccffff" transparent opacity={0} depthWrite={false} blending={THREE.AdditiveBlending} />
+        <meshBasicMaterial color={coreColor} transparent opacity={0} depthWrite={false} blending={THREE.AdditiveBlending} />
       </mesh>
 
       {/* Outer Glow (Wide & Faint) */}
       <mesh ref={glowRef} position={[0, 0.75, 0]}>
         <cylinderGeometry args={[0.015, 0.015, 1.5, 16]} />
-        <meshBasicMaterial color="#00ffff" transparent opacity={0} depthWrite={false} blending={THREE.AdditiveBlending} side={THREE.DoubleSide} />
+        <meshBasicMaterial color={color} transparent opacity={0} depthWrite={false} blending={THREE.AdditiveBlending} side={THREE.DoubleSide} />
       </mesh>
     </group >
   );
@@ -141,8 +249,9 @@ const CityMonument: React.FC<{
   position: THREE.Vector3;
   windmillRotation?: [number, number, number];
   isRotating: boolean;
-  onClick: (pos: THREE.Vector3) => void
-}> = ({ city, position, windmillRotation, isRotating, onClick }) => {
+  onClick: (city: City, pos: THREE.Vector3) => void;
+  status?: 'pending' | 'accepted' | 'rejected';
+}> = ({ city, position, windmillRotation, isRotating, onClick, status = 'pending' }) => {
   const groupRef = useRef<THREE.Group>(null);
   const [hovered, setHovered] = useState(false);
 
@@ -167,8 +276,23 @@ const CityMonument: React.FC<{
 
   const handleClick = (e: any) => {
     e.stopPropagation();
-    onClick(position);
+    onClick(city, position);
   };
+
+  // Determine colors and visibility based on status
+  // Pending: Cyan
+  // Accepted: Pink
+  // Rejected: Black (Invisible/Off)
+
+  const isBeaconVisible = isRotating && status === 'pending';
+
+  let mainColor = "#00ffff"; // Cyan
+  let coreColor = "#ccffff";
+
+  if (status === 'accepted') {
+    mainColor = "#ff0088"; // Pink
+    coreColor = "#ffccdd";
+  }
 
   return (
     <group
@@ -183,6 +307,8 @@ const CityMonument: React.FC<{
         {city.type === 'eiffel' && <EiffelTower />}
         {city.type === 'windmill' && <Windmill key={windmillRotation?.join('-')} rotation={windmillRotation} />}
         {city.type === 'parthenon' && <Parthenon />}
+        {city.type === 'bigben' && <BigBen />}
+        {city.type === 'pyramid' && <GizaPyramid />}
       </group>
 
       <mesh visible={hovered}>
@@ -190,12 +316,13 @@ const CityMonument: React.FC<{
         <meshBasicMaterial color="#ffff00" transparent opacity={0.2} />
       </mesh>
 
-      <LightBeacon visible={isRotating} />
+      <LightBeacon visible={isBeaconVisible} color={mainColor} coreColor={coreColor} />
+
     </group >
   );
 };
 
-const MarioEarth: React.FC<MarioEarthProps> = ({ reliefScale, isRotating, isResetting, onCityClick, windmillRotation }) => {
+const MarioEarth: React.FC<MarioEarthProps & { cityStatus?: Record<string, 'pending' | 'accepted' | 'rejected'> }> = ({ reliefScale, isRotating, isResetting, onCityClick, windmillRotation, cityStatus }) => {
   const globeGroupRef = useRef<THREE.Group>(null);
   const cloudsRef = useRef<THREE.Mesh>(null);
   const [segments, setSegments] = useState(128);
@@ -253,11 +380,11 @@ const MarioEarth: React.FC<MarioEarthProps> = ({ reliefScale, isRotating, isRese
     uniforms.uReliefScale.value = reliefScale;
   });
 
-  const handleCityClick = (localPos: THREE.Vector3) => {
+  const handleCityClick = (city: City, localPos: THREE.Vector3) => {
     if (globeGroupRef.current) {
       globeGroupRef.current.updateMatrixWorld();
       const worldPos = localPos.clone().applyMatrix4(globeGroupRef.current.matrixWorld);
-      onCityClick(worldPos);
+      onCityClick(city, worldPos);
     }
   };
 
@@ -374,6 +501,7 @@ const MarioEarth: React.FC<MarioEarthProps> = ({ reliefScale, isRotating, isRese
             windmillRotation={windmillRotation}
             isRotating={isRotating}
             onClick={handleCityClick}
+            status={cityStatus?.[p.city.name]}
           />
         ))}
       </group>

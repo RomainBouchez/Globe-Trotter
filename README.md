@@ -32,4 +32,72 @@ L'aspect unique de la planète n'est pas une simple texture. C'est un **Shader M
     *   Il calcule une trajectoire fluide entre la position actuelle de la caméra et une position cible au-dessus de la ville.
     *   Il utilise l'interpolation linéaire (`lerp`) pour déplacer la caméra et la cible (`lookAt`) image par image, créant une transition douce sans coupure.
 
+### 4. Monuments 3D
+Chaque destination possède un modèle 3D unique posé sur le globe :
+*   **Tour Eiffel** (Paris) — `.obj`
+*   **Moulin à vent** (Amsterdam) — `.glb`
+*   **Parthénon** (Athènes) — `.glb`
+*   **Big Ben** (Londres) — `.glb`
+*   **Pyramide de Gizeh** (Le Caire) — `.glb`
 
+Les monuments sont orientés selon la normale à la surface du globe (quaternion) et marqués par des **faisceaux lumineux** animés (LightBeacon) visibles en mode orbital.
+
+### 5. Éclairage Dynamique
+*   **Soleil** : Point light principal avec halo visuel.
+*   **Lumière d'ambiance** : Contre-jour violet pour les zones sombres.
+*   **Torche caméra** : Un spotlight directionnel qui suit la caméra et s'active automatiquement uniquement lorsque le monument est du côté nuit de la planète (basé sur le dot product entre la normale de surface et la direction du soleil).
+
+### 6. Interface de Destination
+Lorsqu'on atterrit sur une ville :
+*   **Destinations visitées** (Eiffel, Windmill, Parthenon) : Affichage des photos souvenirs dans des cadres en verre avec effet polaroid et une carte description.
+*   **Nouvelles destinations** (Big Ben, Pyramide, et villes génériques) : Une carte de proposition "Do you want to choose {city} for our next trip together?" avec boutons accepter/refuser.
+*   Les photos s'adaptent à leur orientation (portrait/paysage) grâce à un conteneur flexible.
+
+## 📁 Structure du Projet
+
+```
+App.tsx                          # Scène principale : Canvas, caméra, éclairage, UI
+components/
+  MarioEarth.tsx                 # Globe, données villes, composants monuments
+  DestinationChoiceUI.tsx        # UI d'atterrissage : photos, carte de proposition
+  StarryBackground.tsx           # Champ d'étoiles de fond
+  PhotoOverview.tsx              # Galerie photo
+types.ts                         # Interfaces TypeScript (City, GalaxyConfig)
+public/
+  tour_eiffel.obj                # Modèle 3D Tour Eiffel
+  Windmill.glb                   # Modèle 3D Moulin à vent
+  My_Parthenon1000.glb           # Modèle 3D Parthénon
+  clock_tower_big_ben.glb        # Modèle 3D Big Ben
+  giza_pyramid_low-poly.glb      # Modèle 3D Pyramide de Gizeh
+  photos/                        # Photos des destinations
+```
+
+## 🗺 Destinations
+
+| Ville | Pays | Monument | Statut |
+|-------|------|----------|--------|
+| Paris | France | Tour Eiffel | Souvenir |
+| Amsterdam | Pays-Bas | Moulin à vent | Souvenir |
+| Athènes | Grèce | Parthénon | Souvenir |
+| Londres | Royaume-Uni | Big Ben | Proposition |
+| Le Caire | Égypte | Pyramide de Gizeh | Proposition |
+| Rome | Italie | — | Proposition |
+| Helsinki | Finlande | — | Proposition |
+| Zagreb | Croatie | — | Proposition |
+| Madrid | Espagne | — | Proposition |
+
+## 🏁 Lancer le projet
+
+```bash
+npm install
+npm run dev
+```
+
+Ouvrir [http://localhost:5173](http://localhost:5173) dans le navigateur.
+
+## 📦 Build
+
+```bash
+npm run build
+npm run preview
+```

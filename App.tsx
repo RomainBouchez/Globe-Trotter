@@ -2,9 +2,48 @@ import React, { Suspense, useRef, useState, useCallback } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls, Loader, Stars } from '@react-three/drei';
 import MarioEarth from './components/MarioEarth';
+import DestinationChoiceUI from './components/DestinationChoiceUI';
 import StarryBackground from './components/StarryBackground';
+import { City } from './types';
 
 import * as THREE from 'three';
+
+const SUN_POS = new THREE.Vector3(8, 3, 6).normalize();
+
+const CameraTorch = () => {
+  const lightRef = useRef<THREE.SpotLight>(null);
+  const { camera } = useThree();
+
+  const dir = useRef(new THREE.Vector3());
+
+  useFrame(() => {
+    if (lightRef.current) {
+      lightRef.current.position.copy(camera.position);
+      camera.getWorldDirection(dir.current);
+      lightRef.current.target.position.copy(camera.position).add(dir.current);
+      lightRef.current.target.updateMatrixWorld();
+
+      // Check if the surface facing the camera is on the night side
+      const surfaceNormal = camera.position.clone().normalize();
+      const sunDot = surfaceNormal.dot(SUN_POS);
+      // sunDot > 0 = day side, sunDot < 0 = night side
+      const targetIntensity = sunDot < 0.1 ? 0.7 : 0;
+      lightRef.current.intensity = THREE.MathUtils.lerp(lightRef.current.intensity, targetIntensity, 0.05);
+    }
+  });
+
+  return (
+    <spotLight
+      ref={lightRef}
+      intensity={0}
+      distance={2}
+      decay={0.5}
+      angle={0.34}
+      penumbra={0.4}
+      color="#ffffff"
+    />
+  );
+};
 
 // Component to handle camera animation
 const MeteorZoom = ({
@@ -123,19 +162,40 @@ const App: React.FC = () => {
   const [isRotating, setIsRotating] = useState(true);
   const [isResetting, setIsResetting] = useState(false);
   const [windmillRotation, setWindmillRotation] = useState<[number, number, number]>([1.5, 0.5, -0.6]);
+  const [selectedCity, setSelectedCity] = useState<City | null>(null);
+  const [showPhotos, setShowPhotos] = useState(false);
+
+  const [cityStatus, setCityStatus] = useState<Record<string, 'pending' | 'accepted' | 'rejected'>>({});
 
   // La distance d'atterrissage ajustée à 0.4 pour une meilleure vue d'ensemble sans être trop près
   const FIXED_ARRIVAL_DISTANCE = 0.4;
 
-  const handleCityClick = useCallback((pos: THREE.Vector3) => {
+  const handleCityClick = useCallback((city: City, pos: THREE.Vector3) => {
     setIsRotating(false);
     setIsResetting(false);
     setZoomTarget(pos);
+    setSelectedCity(city);
   }, []);
 
   const handleReturn = () => {
     setIsResetting(true);
     setZoomTarget(null);
+    setShowPhotos(false);
+    setSelectedCity(null);
+  };
+
+  const handleAcceptCity = () => {
+    if (selectedCity) {
+      setCityStatus(prev => ({ ...prev, [selectedCity.name]: 'accepted' }));
+      handleReturn();
+    }
+  };
+
+  const handleRejectCity = () => {
+    if (selectedCity) {
+      setCityStatus(prev => ({ ...prev, [selectedCity.name]: 'rejected' }));
+      handleReturn();
+    }
   };
 
   const onResetFinished = () => {
@@ -169,6 +229,7 @@ const App: React.FC = () => {
         </group>
 
         <pointLight position={[-5, -2, -10]} intensity={1.2} color="#4400ff" />
+        <CameraTorch />
 
         <Suspense fallback={null}>
           <MarioEarth
@@ -177,6 +238,7 @@ const App: React.FC = () => {
             isResetting={isResetting}
             onCityClick={handleCityClick}
             windmillRotation={windmillRotation}
+            cityStatus={cityStatus}
           />
           <StarryBackground />
           <Stars radius={100} depth={50} count={5000} factor={4} saturation={1} fade speed={1} />
@@ -185,7 +247,7 @@ const App: React.FC = () => {
         <MeteorZoom
           targetPos={zoomTarget}
           isResetting={isResetting}
-          onFinishZoom={() => { }}
+          onFinishZoom={() => setShowPhotos(true)}
           onFinishReset={onResetFinished}
           finalViewDistance={FIXED_ARRIVAL_DISTANCE}
         />
@@ -197,7 +259,7 @@ const App: React.FC = () => {
         {/* Header Panel Épuré */}
         <div className="bg-black/60 backdrop-blur-lg p-6 rounded-2xl border border-white/20 shadow-[0_0_40px_rgba(0,0,0,0.5)]">
           <h1 className="text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-yellow-300 via-orange-400 to-red-500 drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)]" style={{ fontFamily: 'Fredoka, sans-serif' }}>
-            GLOBE TROTTER
+            happy Saint Valentin BéBé
           </h1>
           <p className="text-cyan-400 font-bold mt-1 text-xs tracking-[0.2em] uppercase">Exploration du globe</p>
 
@@ -216,7 +278,7 @@ const App: React.FC = () => {
             className="pointer-events-auto bg-gradient-to-b from-yellow-300 to-orange-600 text-black font-black py-4 px-12 rounded-full shadow-[0_10px_40px_rgba(255,165,0,0.4)] hover:scale-105 active:scale-95 transition-all flex items-center gap-3 border-b-4 border-orange-800 uppercase italic tracking-wider"
             style={{ textShadow: '0 1px 0 rgba(255,255,255,0.3)' }}
           >
-            <span className="text-2xl">🚀</span> Décollage Immédiat
+            <span className="text-2xl">🚀</span> back
           </button>
         )}
       </div>
@@ -227,6 +289,14 @@ const App: React.FC = () => {
       {/* DEBUG SLIDERS FOR WINDMILL */}
 
 
+
+      {(showPhotos && selectedCity) && ( // Use conditional render for simpler import if possible, or use standard import at top
+        <DestinationChoiceUI
+          city={selectedCity}
+          onAccept={handleAcceptCity}
+          onReject={handleRejectCity}
+        />
+      )}
 
     </div>
   );
