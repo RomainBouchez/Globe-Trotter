@@ -8,42 +8,52 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@300;400;600&display=swap" rel="stylesheet">
   <style>
+    :root {
+      --bg-deep:       oklch(8% 0.01 60);
+      --bg-surface:    oklch(13% 0.015 60);
+      --bg-overlay:    oklch(10% 0.012 60 / 0.85);
+      --text-primary:  oklch(88% 0.02 75);
+      --text-muted:    oklch(48% 0.03 60);
+      --text-faint:    oklch(32% 0.02 60);
+      --accent:        oklch(72% 0.13 55);
+      --accent-dim:    oklch(72% 0.13 55 / 0.35);
+      --accent-text:   oklch(18% 0.01 55);
+      --danger:        oklch(55% 0.18 25);
+      --photo-frame:   oklch(92% 0.01 75);
+      --border-subtle: oklch(100% 0 0 / 0.08);
+      --border-dim:    oklch(100% 0 0 / 0.15);
+      --radius-card:   16px;
+      --radius-btn:    12px;
+      --radius-pill:   9999px;
+      --ease-out:      cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
     body {
       margin: 0;
       overflow: hidden;
-      background-color: #000;
+      background-color: var(--bg-deep);
       font-family: 'Fredoka', sans-serif;
+      color: var(--text-primary);
     }
 
-    /* Custom scrollbar for chat */
-    ::-webkit-scrollbar {
-      width: 8px;
+    input::placeholder { color: var(--text-faint); }
+
+    @keyframes shakeX {
+      0%, 100% { transform: translateX(0); }
+      20%       { transform: translateX(-12px); }
+      40%       { transform: translateX(10px); }
+      60%       { transform: translateX(-8px); }
+      80%       { transform: translateX(6px); }
+    }
+    @keyframes fadeInUp {
+      from { opacity: 0; transform: translateY(30px); }
+      to   { opacity: 1; transform: translateY(0); }
     }
 
-    ::-webkit-scrollbar-track {
-      background: rgba(255, 255, 255, 0.1);
-    }
-
-    ::-webkit-scrollbar-thumb {
-      background: rgba(255, 255, 255, 0.3);
-      border-radius: 4px;
-    }
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--accent-dim); border-radius: 3px; }
   </style>
-  <script type="importmap">
-{
-  "imports": {
-    "react": "https://esm.sh/react@^19.2.4",
-    "react-dom/": "https://esm.sh/react-dom@^19.2.4/",
-    "react/": "https://esm.sh/react@^19.2.4/",
-    "@react-three/fiber": "https://esm.sh/@react-three/fiber@^9.5.0",
-    "@react-three/drei": "https://esm.sh/@react-three/drei@^10.7.7",
-    "three": "https://esm.sh/three@^0.182.0",
-    "@google/genai": "https://esm.sh/@google/genai@^1.41.0",
-    "this": "https://esm.sh/this@^1.1.0"
-  }
-}
-</script>
-  <link rel="stylesheet" href="/index.css">
 </head>
 
 <body>

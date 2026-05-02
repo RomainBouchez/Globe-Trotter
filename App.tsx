@@ -1,9 +1,11 @@
-import React, { Suspense, useRef, useState, useCallback } from 'react';
+import React, { Suspense, useRef, useState, useCallback, useMemo } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls, Loader, Stars } from '@react-three/drei';
 import MarioEarth from './components/MarioEarth';
 import DestinationChoiceUI from './components/DestinationChoiceUI';
 import StarryBackground from './components/StarryBackground';
+import LoginPage from './components/LoginPage';
+import { usePhotos } from './hooks/usePhotos';
 import { City } from './types';
 
 import * as THREE from 'three';
@@ -46,24 +48,32 @@ const CameraTorch = () => {
 };
 
 // Component to handle camera animation
+const RESUME_ROTATION_DISTANCE = 4.5;
+
 const MeteorZoom = ({
   targetPos,
   isResetting,
   onFinishZoom,
   onFinishReset,
-  finalViewDistance
+  finalViewDistance,
+  onUserInteract,
+  onResumeRotation,
 }: {
   targetPos: THREE.Vector3 | null,
   isResetting: boolean,
   onFinishZoom: () => void,
   onFinishReset: () => void,
-  finalViewDistance: number
+  finalViewDistance: number,
+  onUserInteract: () => void,
+  onResumeRotation: () => void,
 }) => {
   const { camera: rawCamera } = useThree();
   const camera = rawCamera as THREE.PerspectiveCamera;
   const controlsRef = useRef<any>(null);
   const initialFov = 45;
   const worldUp = new THREE.Vector3(0, 1, 0);
+  // Track previous distance to detect threshold crossing
+  const prevDistRef = useRef<number | null>(null);
 
   // État sauvegardé pour le retour exact
   const savedState = useRef({
@@ -76,6 +86,30 @@ const MeteorZoom = ({
 
   useFrame((state, delta) => {
     if (!controlsRef.current) return;
+
+    // --- ZOOM MANUEL : stop/resume rotation au franchissement du seuil ---
+    if (!targetPos && !isResetting) {
+      const dist = camera.position.length();
+      const prev = prevDistRef.current;
+
+      if (prev !== null) {
+        const wasAbove = prev > RESUME_ROTATION_DISTANCE;
+        const isAbove  = dist > RESUME_ROTATION_DISTANCE;
+
+        if (wasAbove && !isAbove) {
+          // a zoomé en dessous du seuil → stop rotation
+          onUserInteract();
+        } else if (!wasAbove && isAbove) {
+          // a dezoomé au-dessus du seuil → reprendre rotation
+          onResumeRotation();
+        }
+      }
+
+      prevDistRef.current = dist;
+    } else {
+      // Réinitialise quand zoom programmé actif (ville ou reset)
+      prevDistRef.current = null;
+    }
 
     // --- LOGIQUE DE RETOUR (DÉCOLLAGE) ---
     if (isResetting) {
@@ -157,6 +191,15 @@ const MeteorZoom = ({
 };
 
 const App: React.FC = () => {
+  const [isAuthenticated, setIsAuthenticated] = useState(
+    () => localStorage.getItem('valentine-auth') === 'true'
+  );
+
+  const handleLoginSuccess = () => {
+    localStorage.setItem('valentine-auth', 'true');
+    setIsAuthenticated(true);
+  };
+
   const fixedRelief = 0.1;
   const [zoomTarget, setZoomTarget] = useState<THREE.Vector3 | null>(null);
   const [isRotating, setIsRotating] = useState(true);
@@ -166,6 +209,18 @@ const App: React.FC = () => {
   const [showPhotos, setShowPhotos] = useState(false);
 
   const [cityStatus, setCityStatus] = useState<Record<string, 'pending' | 'accepted' | 'rejected'>>({});
+  const [sidePanelOpen, setSidePanelOpen] = useState(false);
+
+  const { uploadedPhotos, uploadPhotos, deletePhoto, loading: uploadLoading } = usePhotos(selectedCity?.name ?? null);
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+
+  const allImages = useMemo(() => {
+    const hardcoded = selectedCity?.images || [];
+    const uploaded = uploadedPhotos.map(p => p.url);
+    return [...hardcoded, ...uploaded];
+  }, [selectedCity, uploadedPhotos]);
+
+  const uploadedUrls = useMemo(() => new Set(uploadedPhotos.map(p => p.url)), [uploadedPhotos]);
 
   // La distance d'atterrissage ajustée à 0.4 pour une meilleure vue d'ensemble sans être trop près
   const FIXED_ARRIVAL_DISTANCE = 0.4;
@@ -182,6 +237,7 @@ const App: React.FC = () => {
     setZoomTarget(null);
     setShowPhotos(false);
     setSelectedCity(null);
+    setSidePanelOpen(false);
   };
 
   const handleAcceptCity = () => {
@@ -202,6 +258,10 @@ const App: React.FC = () => {
     setIsResetting(false);
     setIsRotating(true);
   };
+
+  if (!isAuthenticated) {
+    return <LoginPage onSuccess={handleLoginSuccess} />;
+  }
 
   return (
     <div className="relative w-full h-screen bg-black overflow-hidden">
@@ -250,52 +310,210 @@ const App: React.FC = () => {
           onFinishZoom={() => setShowPhotos(true)}
           onFinishReset={onResetFinished}
           finalViewDistance={FIXED_ARRIVAL_DISTANCE}
+          onUserInteract={() => setIsRotating(false)}
+          onResumeRotation={() => setIsRotating(true)}
         />
       </Canvas>
 
       <Loader />
 
       <div className="absolute top-0 left-0 w-full p-6 pointer-events-none flex flex-col items-start gap-4">
-        {/* Header Panel Épuré */}
-        <div className="bg-black/60 backdrop-blur-lg p-6 rounded-2xl border border-white/20 shadow-[0_0_40px_rgba(0,0,0,0.5)]">
-          <h1 className="text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-yellow-300 via-orange-400 to-red-500 drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)]" style={{ fontFamily: 'Fredoka, sans-serif' }}>
-            happy Saint Valentin BéBé
+        <div>
+          <h1 className="text-3xl font-semibold" style={{ fontFamily: 'Fredoka, sans-serif', color: 'var(--text-primary)' }}>
+            Pour Mika
           </h1>
-          <p className="text-cyan-400 font-bold mt-1 text-xs tracking-[0.2em] uppercase">Exploration du globe</p>
-
-          <div className="mt-6 flex items-center gap-3">
-            <div className={`w-3 h-3 rounded-full ${!isRotating && !isResetting ? 'bg-red-500 animate-pulse' : 'bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.8)]'}`}></div>
-            <div className="text-[10px] text-white/80 font-black uppercase tracking-tighter">
-              {isRotating ? "Statut : En Orbite" : (isResetting ? "Statut : Extraction" : "Statut : Surface Atteinte")}
-            </div>
-          </div>
+          <p className="text-xs mt-1 tracking-wide" style={{ color: 'var(--text-muted)' }}>Explore nos souvenirs</p>
         </div>
 
         {/* Return Button */}
-        {(!isRotating && !isResetting) && (
+        {(selectedCity !== null && !isResetting) && (
           <button
             onClick={handleReturn}
-            className="pointer-events-auto bg-gradient-to-b from-yellow-300 to-orange-600 text-black font-black py-4 px-12 rounded-full shadow-[0_10px_40px_rgba(255,165,0,0.4)] hover:scale-105 active:scale-95 transition-all flex items-center gap-3 border-b-4 border-orange-800 uppercase italic tracking-wider"
-            style={{ textShadow: '0 1px 0 rgba(255,255,255,0.3)' }}
+            className="pointer-events-auto flex items-center gap-2 px-5 py-2.5 transition-all duration-[220ms] hover:scale-[1.02] active:scale-[0.98]"
+            style={{
+              background: 'var(--bg-surface)',
+              border: '1px solid var(--border-dim)',
+              borderRadius: 'var(--radius-btn)',
+              color: 'var(--text-primary)',
+              fontFamily: 'Fredoka, sans-serif',
+              fontSize: '14px',
+              fontWeight: 500,
+              cursor: 'pointer',
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--accent)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--border-dim)'; }}
           >
-            <span className="text-2xl">🚀</span> back
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M10 3L5 8L10 13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+            Retour
           </button>
         )}
       </div>
 
-      {/* DEBUG SLIDERS FOR EIFFEL TOWER */}
-
-
-      {/* DEBUG SLIDERS FOR WINDMILL */}
-
-
-
-      {(showPhotos && selectedCity) && ( // Use conditional render for simpler import if possible, or use standard import at top
+      {(showPhotos && selectedCity) && (
         <DestinationChoiceUI
-          city={selectedCity}
+          city={{ ...selectedCity, images: allImages }}
           onAccept={handleAcceptCity}
           onReject={handleRejectCity}
         />
+      )}
+
+      {/* Burger Menu Button */}
+      {(showPhotos && selectedCity) && (
+        <button
+          onClick={() => setSidePanelOpen(prev => !prev)}
+          className="absolute top-6 right-6 z-[200] pointer-events-auto w-10 h-10 flex flex-col items-center justify-center gap-[4px] rounded-[var(--radius-btn)] border transition-all duration-[220ms] hover:scale-[1.05] active:scale-[0.96]"
+          style={{ background: 'var(--bg-surface)', borderColor: 'var(--border-dim)' }}
+        >
+          <span className={`block w-5 h-[2px] rounded transition-all duration-300 ${sidePanelOpen ? 'rotate-45 translate-y-[6px]' : ''}`} style={{ background: 'var(--text-primary)' }} />
+          <span className={`block w-5 h-[2px] rounded transition-all duration-300 ${sidePanelOpen ? 'opacity-0' : ''}`} style={{ background: 'var(--text-primary)' }} />
+          <span className={`block w-5 h-[2px] rounded transition-all duration-300 ${sidePanelOpen ? '-rotate-45 -translate-y-[6px]' : ''}`} style={{ background: 'var(--text-primary)' }} />
+        </button>
+      )}
+
+      {/* Side Panel - Photo Gallery */}
+      {selectedCity && (
+        <>
+          {/* Backdrop */}
+          <div
+            className={`absolute inset-0 bg-black/40 transition-opacity duration-500 ${sidePanelOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
+            style={{ zIndex: 150 }}
+            onClick={() => setSidePanelOpen(false)}
+          />
+
+          {/* Panel */}
+          <div
+            className={`absolute top-0 right-0 h-full w-[400px] max-w-[85vw] border-l shadow-[-10px_0_40px_rgba(0,0,0,0.6)] transition-transform duration-500 ease-out overflow-y-auto ${sidePanelOpen ? 'translate-x-0' : 'translate-x-full'}`}
+            style={{ zIndex: 160, background: 'var(--bg-overlay)', borderColor: 'var(--border-subtle)', backdropFilter: 'blur(12px)' }}
+          >
+            {/* Panel Header */}
+            <div className="sticky top-0 p-5 border-b" style={{ background: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
+              <h3 className="text-xl font-semibold" style={{ fontFamily: 'Fredoka, sans-serif', color: 'var(--text-primary)' }}>
+                {selectedCity.name}
+              </h3>
+              <p className="text-xs tracking-wide mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                Photos & Souvenirs
+              </p>
+            </div>
+
+            {/* Photo Grid */}
+            <div className="p-4 grid grid-cols-2 gap-3">
+              {allImages.length > 0 ? (
+                allImages.map((img, i) => {
+                  const isUploaded = uploadedUrls.has(img);
+                  const uploadedPhoto = isUploaded ? uploadedPhotos.find(p => p.url === img) : null;
+                  return (
+                    <div
+                      key={img}
+                      className="group relative rounded-xl overflow-hidden"
+                      style={{
+                        border: '1px solid var(--border-subtle)',
+                        opacity: sidePanelOpen ? 1 : 0,
+                        transform: sidePanelOpen ? 'translateX(0)' : 'translateX(40px)',
+                        transition: `all 0.5s ease-out ${0.15 + i * 0.1}s`,
+                      }}
+                      onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--accent-dim)'; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--border-subtle)'; }}
+                    >
+                      <img
+                        src={img}
+                        alt={`${selectedCity.name} ${i + 1}`}
+                        className="w-full h-auto block rounded-xl"
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                      {isUploaded && uploadedPhoto && (
+                        <button
+                          onClick={() => setConfirmDelete(uploadedPhoto.filename)}
+                          className="absolute top-2 right-2 w-8 h-8 rounded-full bg-black/60 backdrop-blur-sm border border-white/20 text-white/70 hover:text-red-400 hover:bg-red-900/40 hover:border-red-400/50 opacity-0 group-hover:opacity-100 transition-all flex items-center justify-center text-sm"
+                        >
+                          X
+                        </button>
+                      )}
+                    </div>
+                  );
+                })
+              ) : (
+                <div className="col-span-2 text-center py-12 italic" style={{ color: 'var(--text-muted)' }}>
+                  No photos of us yet
+                </div>
+              )}
+            </div>
+
+            {/* Upload Section */}
+            <div className="p-5 border-t" style={{ borderColor: 'var(--border-subtle)' }}>
+              <label className="flex flex-col items-center cursor-pointer">
+                <div
+                  className="w-full py-5 rounded-[var(--radius-card)] border border-dashed flex flex-col items-center gap-2 transition-all duration-[220ms]"
+                  style={{ borderColor: 'var(--border-dim)', background: 'var(--bg-surface)' }}
+                  onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.borderColor = 'var(--accent)'; }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.borderColor = 'var(--border-dim)'; }}
+                >
+                  <svg width="20" height="20" viewBox="0 0 20 20" fill="none" style={{ color: 'var(--text-muted)' }}>
+                    <path d="M10 13V4M6 8l4-4 4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                    <path d="M3 15h14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                  </svg>
+                  <span className="text-sm font-medium" style={{ color: 'var(--text-muted)' }}>Ajouter des photos</span>
+                </div>
+                <input
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  className="hidden"
+                  onChange={(e) => {
+                    if (e.target.files && e.target.files.length > 0) {
+                      uploadPhotos(e.target.files);
+                      e.target.value = '';
+                    }
+                  }}
+                />
+              </label>
+              {uploadLoading && (
+                <p className="text-center text-sm mt-2 animate-pulse" style={{ color: 'var(--accent)' }}>
+                  Uploading...
+                </p>
+              )}
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Delete Confirmation Dialog */}
+      {confirmDelete && (
+        <div className="absolute inset-0 flex items-center justify-center" style={{ zIndex: 300 }}>
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setConfirmDelete(null)} />
+          <div
+            className="relative p-8 max-w-sm w-full mx-4"
+            style={{
+              background: 'var(--bg-surface)',
+              border: '1px solid var(--border-dim)',
+              borderRadius: 'var(--radius-card)',
+              boxShadow: '0 0 40px rgba(0,0,0,0.8)',
+            }}
+          >
+            <h4 className="text-xl font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>Supprimer cette photo ?</h4>
+            <p className="text-sm mb-6" style={{ color: 'var(--text-muted)' }}>Cette action est irréversible.</p>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setConfirmDelete(null)}
+                className="px-5 py-2 rounded-full font-medium border transition-all hover:scale-[1.02]"
+                style={{ background: 'transparent', borderColor: 'var(--border-dim)', color: 'var(--text-primary)' }}
+              >
+                Annuler
+              </button>
+              <button
+                onClick={() => {
+                  deletePhoto(confirmDelete);
+                  setConfirmDelete(null);
+                }}
+                className="px-5 py-2 rounded-full text-white font-medium transition-all hover:scale-[1.02] active:scale-[0.97]"
+                style={{ background: 'var(--danger)' }}
+              >
+                Supprimer
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
     </div>

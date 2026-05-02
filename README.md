@@ -53,23 +53,33 @@ Lorsqu'on atterrit sur une ville :
 *   **Nouvelles destinations** (Big Ben, Pyramide, et villes génériques) : Une carte de proposition "Do you want to choose {city} for our next trip together?" avec boutons accepter/refuser.
 *   Les photos s'adaptent à leur orientation (portrait/paysage) grâce à un conteneur flexible.
 
+### 7. Upload de Photos & Backend
+
+L'app inclut un backend Express leger pour uploader et stocker des photos par destination :
+*   **Burger menu** (en haut a droite) ouvre un side panel avec la galerie photo.
+*   **Upload** : Bouton "+" en bas du panel pour ajouter des photos (max 10MB, formats image).
+*   **Suppression** : Bouton "X" au hover sur les photos uploadees, avec dialog de confirmation.
+*   **Persistance** : Photos stockees sur le filesystem dans `data/photos/{ville}/`, metadonnees dans `data/photos.json`.
+*   **API** : Express 5 + Multer, endpoints REST simples.
+
 ## 📁 Structure du Projet
 
 ```
-App.tsx                          # Scène principale : Canvas, caméra, éclairage, UI
+App.tsx                          # Scene principale : Canvas, camera, eclairage, UI
+server.js                        # Backend Express (API upload + serveur statique)
+hooks/
+  usePhotos.ts                   # Hook React pour fetch/upload/delete photos
 components/
-  MarioEarth.tsx                 # Globe, données villes, composants monuments
+  MarioEarth.tsx                 # Globe, donnees villes, composants monuments
   DestinationChoiceUI.tsx        # UI d'atterrissage : photos, carte de proposition
-  StarryBackground.tsx           # Champ d'étoiles de fond
-  PhotoOverview.tsx              # Galerie photo
+  StarryBackground.tsx           # Champ d'etoiles de fond
+  LoginPage.tsx                  # Page de connexion
 types.ts                         # Interfaces TypeScript (City, GalaxyConfig)
 public/
-  tour_eiffel.obj                # Modèle 3D Tour Eiffel
-  Windmill.glb                   # Modèle 3D Moulin à vent
-  My_Parthenon1000.glb           # Modèle 3D Parthénon
-  clock_tower_big_ben.glb        # Modèle 3D Big Ben
-  giza_pyramid_low-poly.glb      # Modèle 3D Pyramide de Gizeh
-  photos/                        # Photos des destinations
+  photos/                        # Photos statiques (hardcodees)
+data/                            # Cree automatiquement au 1er lancement
+  photos.json                   # Index des photos uploadees par ville
+  photos/                       # Photos uploadees, organisees par ville
 ```
 
 ## 🗺 Destinations
@@ -86,18 +96,119 @@ public/
 | Zagreb | Croatie | — | Proposition |
 | Madrid | Espagne | — | Proposition |
 
-## 🏁 Lancer le projet
+## 🏁 Developpement local
+
+Ouvrir **2 terminaux** :
 
 ```bash
+# Terminal 1 - Frontend (Vite, port 3000)
 npm install
 npm run dev
+
+# Terminal 2 - Backend (Express, port 3001)
+npm run dev:server
 ```
 
-Ouvrir [http://localhost:5173](http://localhost:5173) dans le navigateur.
+Ouvrir [http://localhost:3000](http://localhost:3000) dans le navigateur.
+Le proxy Vite redirige automatiquement `/api` et `/uploads` vers le backend.
 
 ## 📦 Build
 
 ```bash
 npm run build
-npm run preview
 ```
+
+## 🍓 Deploiement sur Raspberry Pi
+
+### Prerequis
+
+Node.js >= 18 sur le Pi. Pour l'installer :
+
+```bash
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo bash -
+sudo apt-get install -y nodejs
+```
+
+### 1. Builder le frontend (sur ta machine de dev)
+
+```bash
+npm run build
+```
+
+### 2. Transferer le projet sur le Pi
+
+```bash
+rsync -avz --exclude node_modules --exclude .git \
+  ./ pi@<IP_DU_PI>:/home/pi/super-galaxy-earth/
+```
+
+### 3. Installer les dependances sur le Pi
+
+```bash
+ssh pi@<IP_DU_PI>
+cd /home/pi/super-galaxy-earth
+npm install --production
+```
+
+### 4. Lancer le serveur
+
+```bash
+node server.js
+```
+
+L'app est accessible sur `http://<IP_DU_PI>:3000` depuis n'importe quel appareil sur le meme reseau.
+
+Pour changer le port : `PORT=8080 node server.js`
+
+### 5. (Optionnel) Demarrage automatique avec systemd
+
+```bash
+sudo nano /etc/systemd/system/galaxy-earth.service
+```
+
+```ini
+[Unit]
+Description=Super Galaxy Earth
+After=network.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/super-galaxy-earth
+ExecStart=/usr/bin/node server.js
+Restart=on-failure
+Environment=PORT=3000
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl enable galaxy-earth
+sudo systemctl start galaxy-earth
+```
+
+Commandes utiles :
+
+```bash
+sudo systemctl status galaxy-earth    # Statut
+sudo systemctl restart galaxy-earth   # Redemarrer
+sudo journalctl -u galaxy-earth -f    # Logs en temps reel
+```
+
+## 📡 API
+
+| Methode | Route | Description |
+|---------|-------|-------------|
+| `GET` | `/api/photos/:cityName` | Liste les photos uploadees d'une ville |
+| `POST` | `/api/photos/:cityName` | Upload (champ `photos`, max 5 fichiers, 10MB/fichier) |
+| `DELETE` | `/api/photos/:cityName/:filename` | Supprime une photo |
+
+## 📦 Scripts npm
+
+| Commande | Description |
+|----------|-------------|
+| `npm run dev` | Frontend Vite (dev, port 3000) |
+| `npm run dev:server` | Backend Express (dev, port 3001) |
+| `npm run build` | Build frontend dans `dist/` |
+| `npm start` | Production : frontend + backend sur port 3000 |

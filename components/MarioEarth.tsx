@@ -22,7 +22,9 @@ const CITIES: City[] = [
     type: 'eiffel',
     description: "La France, pays de l'amour, de la gastronomie et de l'art de vivre.",
     images: [
-      "photos/paris1.jpg"
+      "photos/paris1.jpg",
+      "photos/paris2.JPEG",
+      "photos/france3.JPEG"
     ]
   },
   {

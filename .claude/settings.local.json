@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "Bash(powershell -Command:*)",
-      "Bash(test:*)"
+      "Bash(test:*)",
+      "Bash(npm install:*)",
+      "Bash(npm ls:*)"
     ]
   }
 }
