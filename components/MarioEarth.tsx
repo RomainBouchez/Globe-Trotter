@@ -11,20 +11,28 @@ interface MarioEarthProps {
   isResetting: boolean;
   onCityClick: (city: City, pos: THREE.Vector3) => void;
   windmillRotation?: [number, number, number];
+  cities?: City[];
 }
 
 
-const CITIES: City[] = [
+export const INITIAL_CITIES: City[] = [
   {
     name: 'France',
     lat: 48.8566,
     lng: 2.3522,
     type: 'eiffel',
     description: "La France, pays de l'amour, de la gastronomie et de l'art de vivre.",
-    images: [
-      "photos/paris1.jpg",
-      "photos/paris2.JPEG",
-      "photos/france3.JPEG"
+    subCities: [
+      {
+        name: 'Paris',
+        description: "La ville lumière — notre ville.",
+        images: []
+      },
+      {
+        name: 'Nantes',
+        description: "La cité des Ducs de Bretagne.",
+        images: []
+      }
     ]
   },
   {
@@ -324,7 +332,8 @@ const CityMonument: React.FC<{
   );
 };
 
-const MarioEarth: React.FC<MarioEarthProps & { cityStatus?: Record<string, 'pending' | 'accepted' | 'rejected'> }> = ({ reliefScale, isRotating, isResetting, onCityClick, windmillRotation, cityStatus }) => {
+const MarioEarth: React.FC<MarioEarthProps & { cityStatus?: Record<string, 'pending' | 'accepted' | 'rejected'> }> = ({ reliefScale, isRotating, isResetting, onCityClick, windmillRotation, cityStatus, cities }) => {
+  const cityList = cities ?? INITIAL_CITIES;
   const globeGroupRef = useRef<THREE.Group>(null);
   const cloudsRef = useRef<THREE.Mesh>(null);
   const [segments, setSegments] = useState(128);
@@ -365,11 +374,11 @@ const MarioEarth: React.FC<MarioEarthProps & { cityStatus?: Record<string, 'pend
 
   const pins = useMemo(() => {
     const pinRadius = 2.05;
-    return CITIES.map(city => ({
+    return cityList.map(city => ({
       city,
       pos: latLngToVector3(city.lat, city.lng, pinRadius)
     }));
-  }, []);
+  }, [cityList]);
 
   useFrame((state, delta) => {
     if (globeGroupRef.current && isRotating) {

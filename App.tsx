@@ -1,14 +1,35 @@
-import React, { Suspense, useRef, useState, useCallback, useMemo } from 'react';
+import React, { Suspense, useRef, useState, useCallback, useMemo, useEffect } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls, Loader, Stars } from '@react-three/drei';
-import MarioEarth from './components/MarioEarth';
+import MarioEarth, { INITIAL_CITIES } from './components/MarioEarth';
 import DestinationChoiceUI from './components/DestinationChoiceUI';
+import SubCityPicker from './components/SubCityPicker';
+import SmartUploadDialog, { ConfirmGroup } from './components/SmartUploadDialog';
 import StarryBackground from './components/StarryBackground';
 import LoginPage from './components/LoginPage';
 import { usePhotos } from './hooks/usePhotos';
-import { City } from './types';
+import { City, SubCity } from './types';
+import { extractImagesFromZip, isZipFile } from './utils/zipUtils';
 
 import * as THREE from 'three';
+
+// ── Date header formatter (iPhone Photos style) ───────────────────────────
+function formatDateHeader(isoDate: string | null): string {
+  if (!isoDate) return 'Souvenirs';
+  const d = new Date(isoDate);
+  const now = new Date();
+  const toMidnight = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate());
+  const diffDays = Math.round(
+    (toMidnight(now).getTime() - toMidnight(d).getTime()) / 86_400_000
+  );
+  if (diffDays === 0) return "Aujourd'hui";
+  if (diffDays === 1) return 'Hier';
+  const opts: Intl.DateTimeFormatOptions = { weekday: 'long', day: 'numeric', month: 'long' };
+  if (d.getFullYear() !== now.getFullYear()) opts.year = 'numeric';
+  // Capitalise first letter
+  const s = d.toLocaleDateString('fr-FR', opts);
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
 
 const SUN_POS = new THREE.Vector3(8, 3, 6).normalize();
 
@@ -208,19 +229,90 @@ const App: React.FC = () => {
   const [selectedCity, setSelectedCity] = useState<City | null>(null);
   const [showPhotos, setShowPhotos] = useState(false);
 
+  const [cities, setCities] = useState<City[]>(INITIAL_CITIES);
+
+  // Load persisted dynamic sub-cities from DB on mount
+  useEffect(() => {
+    fetch('/api/sub-cities')
+      .then(r => r.json())
+      .then(({ subCities }: { subCities: { parentCityName: string; subCityName: string; description: string }[] }) => {
+        if (!subCities?.length) return;
+        setCities(prev => prev.map(city => {
+          const additions = subCities
+            .filter(s => s.parentCityName === city.name)
+            .filter(s => !city.subCities?.some(e => e.name === s.subCityName))
+            .map(s => ({ name: s.subCityName, description: s.description, images: [] }));
+          if (!additions.length) return city;
+          return { ...city, subCities: [...(city.subCities ?? []), ...additions] };
+        }));
+      })
+      .catch(() => {});
+  }, []);
+
   const [cityStatus, setCityStatus] = useState<Record<string, 'pending' | 'accepted' | 'rejected'>>({});
   const [sidePanelOpen, setSidePanelOpen] = useState(false);
+  const [selectedSubCity, setSelectedSubCity] = useState<SubCity | null>(null);
+  const [smartUploadFiles, setSmartUploadFiles] = useState<File[] | null>(null);
 
-  const { uploadedPhotos, uploadPhotos, deletePhoto, loading: uploadLoading } = usePhotos(selectedCity?.name ?? null);
+  // Photos keyed by sub-city name when inside a country, else by city name
+  const photoKey = selectedSubCity?.name ?? (selectedCity?.subCities ? null : selectedCity?.name ?? null);
+  const { uploadedPhotos, uploadPhotos, deletePhoto, loading: uploadLoading, uploadProgress, setPhotoRole } = usePhotos(photoKey);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
   const allImages = useMemo(() => {
-    const hardcoded = selectedCity?.images || [];
-    const uploaded = uploadedPhotos.map(p => p.url);
-    return [...hardcoded, ...uploaded];
-  }, [selectedCity, uploadedPhotos]);
+    const hardcoded = selectedSubCity?.images ?? (selectedCity?.subCities ? [] : selectedCity?.images ?? []);
+
+    // Featured photos fill slots 1/2/3; if none defined, natural order
+    const featuredSlots = ([1, 2, 3] as const)
+      .map(ord => uploadedPhotos.find(p => p.featuredOrder === ord)?.url ?? null);
+    const hasFeatured = featuredSlots.some(Boolean);
+
+    if (hasFeatured) {
+      const featuredUrls = new Set(featuredSlots.filter(Boolean) as string[]);
+      const rest = [...hardcoded, ...uploadedPhotos.map(p => p.url)].filter(u => !featuredUrls.has(u));
+      return [...(featuredSlots.filter(Boolean) as string[]), ...rest];
+    }
+    return [...hardcoded, ...uploadedPhotos.map(p => p.url)];
+  }, [selectedCity, selectedSubCity, uploadedPhotos]);
 
   const uploadedUrls = useMemo(() => new Set(uploadedPhotos.map(p => p.url)), [uploadedPhotos]);
+
+  // Gallery items: chronological order + date section headers
+  type GalleryHeader = { type: 'header'; label: string; key: string };
+  type GalleryPhoto  = { type: 'photo';  url: string; photoIdx: number };
+  type GalleryItem   = GalleryHeader | GalleryPhoto;
+
+  const galleryItems = useMemo((): GalleryItem[] => {
+    const hardcoded = selectedSubCity?.images ?? (selectedCity?.subCities ? [] : selectedCity?.images ?? []);
+    const items: GalleryItem[] = [];
+    let photoIdx = 0;
+
+    // Hardcoded images (no date metadata)
+    if (hardcoded.length) {
+      items.push({ type: 'header', label: 'Souvenirs', key: 'h-souvenirs' });
+      hardcoded.forEach(url => items.push({ type: 'photo', url, photoIdx: photoIdx++ }));
+    }
+
+    // Uploaded photos — sort by photo date (EXIF if available, else upload date)
+    const sorted = [...uploadedPhotos].sort((a, b) => {
+      const da = new Date(a.takenAt ?? a.uploadedAt).getTime();
+      const db = new Date(b.takenAt ?? b.uploadedAt).getTime();
+      return da - db;
+    });
+
+    let lastDateKey = '';
+    for (const p of sorted) {
+      const dateStr = p.takenAt ?? p.uploadedAt;
+      const dateKey = dateStr.slice(0, 10); // YYYY-MM-DD
+      if (dateKey !== lastDateKey) {
+        lastDateKey = dateKey;
+        items.push({ type: 'header', label: formatDateHeader(dateStr), key: `h-${dateKey}` });
+      }
+      items.push({ type: 'photo', url: p.url, photoIdx: photoIdx++ });
+    }
+
+    return items;
+  }, [selectedCity, selectedSubCity, uploadedPhotos]);
 
   // La distance d'atterrissage ajustée à 0.4 pour une meilleure vue d'ensemble sans être trop près
   const FIXED_ARRIVAL_DISTANCE = 0.4;
@@ -233,11 +325,84 @@ const App: React.FC = () => {
   }, []);
 
   const handleReturn = () => {
-    setIsResetting(true);
-    setZoomTarget(null);
-    setShowPhotos(false);
-    setSelectedCity(null);
-    setSidePanelOpen(false);
+    if (selectedSubCity) {
+      // Niveau 1 : retour au SubCityPicker (pas de dezoom)
+      setSelectedSubCity(null);
+      setSidePanelOpen(false);
+    } else {
+      // Niveau 2 : dezoom globe
+      setIsResetting(true);
+      setZoomTarget(null);
+      setShowPhotos(false);
+      setSelectedCity(null);
+      setSidePanelOpen(false);
+    }
+  };
+
+  const handleSubCitySelect = (subCity: SubCity) => {
+    setSelectedSubCity(subCity);
+    setSidePanelOpen(true);
+  };
+
+  // Global smart upload — handle file input (images + ZIPs)
+  const handleGlobalFileInput = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files?.length) return;
+    const raw = Array.from(e.target.files);
+    e.target.value = '';
+
+    const images: File[] = [];
+    for (const file of raw) {
+      if (isZipFile(file)) {
+        const extracted = await extractImagesFromZip(file);
+        images.push(...extracted);
+      } else {
+        images.push(file);
+      }
+    }
+    if (images.length > 0) setSmartUploadFiles(images);
+  };
+
+  // Upload confirmed groups to correct city endpoints
+  const handleSmartUploadConfirm = async (groups: ConfirmGroup[]) => {
+    setSmartUploadFiles(null);
+
+    for (const group of groups) {
+      const cityName = group.target?.subCityName ?? group.target?.cityName ?? group.newCityName;
+      if (!cityName || group.files.length === 0) continue;
+
+      // If new sub-city with a parent, inject into state + persist to DB
+      if (group.newCityName && group.newParentCityName) {
+        setCities(prev => prev.map(c => {
+          if (c.name !== group.newParentCityName) return c;
+          const already = c.subCities?.some(s => s.name === group.newCityName);
+          if (already) return c;
+          return {
+            ...c,
+            subCities: [...(c.subCities ?? []), { name: group.newCityName!, images: [] }],
+          };
+        }));
+        // Persist to SQLite
+        fetch('/api/sub-cities', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            parentCityName: group.newParentCityName,
+            subCityName: group.newCityName,
+          }),
+        }).catch(() => {});
+      }
+
+      const formData = new FormData();
+      group.files.forEach(f => formData.append('photos', f));
+      try {
+        await fetch(`/api/photos/${encodeURIComponent(cityName)}`, {
+          method: 'POST',
+          body: formData,
+        });
+      } catch (err) {
+        console.error(`Upload failed for ${cityName}:`, err);
+      }
+    }
   };
 
   const handleAcceptCity = () => {
@@ -299,6 +464,7 @@ const App: React.FC = () => {
             onCityClick={handleCityClick}
             windmillRotation={windmillRotation}
             cityStatus={cityStatus}
+            cities={cities}
           />
           <StarryBackground />
           <Stars radius={100} depth={50} count={5000} factor={4} saturation={1} fade speed={1} />
@@ -351,16 +517,31 @@ const App: React.FC = () => {
         )}
       </div>
 
-      {(showPhotos && selectedCity) && (
+      {/* Country with sub-cities → SubCityPicker */}
+      {(showPhotos && selectedCity?.subCities?.length && !selectedSubCity) && (
+        <SubCityPicker
+          countryName={selectedCity.name}
+          subCities={selectedCity.subCities}
+          onSelect={handleSubCitySelect}
+        />
+      )}
+
+      {/* Regular city OR sub-city selected → DestinationChoiceUI */}
+      {(showPhotos && selectedCity && (!selectedCity.subCities?.length || selectedSubCity)) && (
         <DestinationChoiceUI
-          city={{ ...selectedCity, images: allImages }}
+          city={{
+            ...selectedCity,
+            name: selectedSubCity?.name ?? selectedCity.name,
+            description: selectedSubCity?.description ?? selectedCity.description,
+            images: allImages,
+          }}
           onAccept={handleAcceptCity}
           onReject={handleRejectCity}
         />
       )}
 
-      {/* Burger Menu Button */}
-      {(showPhotos && selectedCity) && (
+      {/* Burger Menu Button — visible quand ville/sub-city active */}
+      {(showPhotos && selectedCity && (!selectedCity.subCities?.length || selectedSubCity)) && (
         <button
           onClick={() => setSidePanelOpen(prev => !prev)}
           className="absolute top-6 right-6 z-[200] pointer-events-auto w-10 h-10 flex flex-col items-center justify-center gap-[4px] rounded-[var(--radius-btn)] border transition-all duration-[220ms] hover:scale-[1.05] active:scale-[0.96]"
@@ -390,50 +571,109 @@ const App: React.FC = () => {
             {/* Panel Header */}
             <div className="sticky top-0 p-5 border-b" style={{ background: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
               <h3 className="text-xl font-semibold" style={{ fontFamily: 'Fredoka, sans-serif', color: 'var(--text-primary)' }}>
-                {selectedCity.name}
+                {selectedSubCity?.name ?? selectedCity.name}
               </h3>
               <p className="text-xs tracking-wide mt-0.5" style={{ color: 'var(--text-muted)' }}>
-                Photos & Souvenirs
+                {selectedSubCity ? `${selectedCity.name} · Photos & Souvenirs` : 'Photos & Souvenirs'}
               </p>
             </div>
 
-            {/* Photo Grid */}
-            <div className="p-4 grid grid-cols-2 gap-3">
-              {allImages.length > 0 ? (
-                allImages.map((img, i) => {
-                  const isUploaded = uploadedUrls.has(img);
-                  const uploadedPhoto = isUploaded ? uploadedPhotos.find(p => p.url === img) : null;
-                  return (
-                    <div
-                      key={img}
-                      className="group relative rounded-xl overflow-hidden"
-                      style={{
-                        border: '1px solid var(--border-subtle)',
-                        opacity: sidePanelOpen ? 1 : 0,
-                        transform: sidePanelOpen ? 'translateX(0)' : 'translateX(40px)',
-                        transition: `all 0.5s ease-out ${0.15 + i * 0.1}s`,
-                      }}
-                      onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--accent-dim)'; }}
-                      onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--border-subtle)'; }}
+            {/* Photo Grid — grouped by date */}
+            <div className="p-4 grid grid-cols-2 gap-x-3 gap-y-3">
+              {galleryItems.length > 0 ? galleryItems.map(item => {
+
+                // ── Date header ────────────────────────────────────────────
+                if (item.type === 'header') return (
+                  <div key={item.key} className="col-span-2 flex items-center gap-2.5 mt-3 first:mt-0">
+                    <span
+                      className="text-[11px] tracking-wider whitespace-nowrap"
+                      style={{ color: 'var(--text-faint)', fontFamily: 'Fredoka, sans-serif', letterSpacing: '0.06em' }}
                     >
-                      <img
-                        src={img}
-                        alt={`${selectedCity.name} ${i + 1}`}
-                        className="w-full h-auto block rounded-xl"
-                      />
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-                      {isUploaded && uploadedPhoto && (
+                      {item.label}
+                    </span>
+                    <div className="flex-1 h-px" style={{ background: 'var(--border-subtle)' }} />
+                  </div>
+                );
+
+                // ── Photo tile ─────────────────────────────────────────────
+                const { url: img, photoIdx } = item;
+                const isUploaded = uploadedUrls.has(img);
+                const uploadedPhoto = isUploaded ? uploadedPhotos.find(p => p.url === img) : null;
+                const isPreview = uploadedPhoto?.isPreview ?? false;
+                const featuredOrder = uploadedPhoto?.featuredOrder ?? null;
+
+                const nextFeaturedOrder = (): 1 | 2 | 3 | null => {
+                  if (featuredOrder === null) {
+                    for (const slot of [1, 2, 3] as const) {
+                      if (!uploadedPhotos.some(p => p.featuredOrder === slot)) return slot;
+                    }
+                    return 1;
+                  }
+                  if (featuredOrder === 1) return 2;
+                  if (featuredOrder === 2) return 3;
+                  return null;
+                };
+
+                return (
+                  <div
+                    key={img}
+                    className="group relative rounded-xl overflow-hidden"
+                    style={{
+                      border: `1px solid ${isPreview || featuredOrder ? 'var(--accent-dim)' : 'var(--border-subtle)'}`,
+                      opacity: sidePanelOpen ? 1 : 0,
+                      transform: sidePanelOpen ? 'translateX(0)' : 'translateX(40px)',
+                      transition: `all 0.5s ease-out ${0.15 + photoIdx * 0.07}s`,
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--accent)'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.borderColor = isPreview || featuredOrder ? 'var(--accent-dim)' : 'var(--border-subtle)'; }}
+                  >
+                    <img src={img} alt={`photo ${photoIdx + 1}`} className="w-full h-auto block rounded-xl" />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+
+                    {/* Role badges */}
+                    {isPreview && (
+                      <div className="absolute top-2 left-2 px-1.5 py-0.5 rounded text-[10px] font-semibold" style={{ background: 'var(--accent)', color: 'var(--accent-text)' }}>
+                        Aperçu
+                      </div>
+                    )}
+                    {featuredOrder && (
+                      <div
+                        className="absolute top-2 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold"
+                        style={{ background: 'var(--accent)', color: 'var(--accent-text)', left: isPreview ? '52px' : '8px' }}
+                      >
+                        {featuredOrder}
+                      </div>
+                    )}
+
+                    {/* Action buttons (uploaded only, on hover) */}
+                    {isUploaded && uploadedPhoto && (
+                      <div className="absolute bottom-2 left-0 right-0 px-2 flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                        <button
+                          onClick={() => setPhotoRole(uploadedPhoto.filename, 'preview', !isPreview)}
+                          className="flex-1 py-1 rounded text-[10px] font-semibold transition-all"
+                          style={{ background: isPreview ? 'var(--accent)' : 'rgba(0,0,0,0.65)', color: isPreview ? 'var(--accent-text)' : 'rgba(255,255,255,0.8)', border: `1px solid ${isPreview ? 'var(--accent)' : 'rgba(255,255,255,0.2)'}`, backdropFilter: 'blur(4px)' }}
+                        >
+                          Aperçu
+                        </button>
+                        <button
+                          onClick={() => setPhotoRole(uploadedPhoto.filename, 'featured', nextFeaturedOrder())}
+                          className="flex-1 py-1 rounded text-[10px] font-semibold transition-all"
+                          style={{ background: featuredOrder ? 'var(--accent)' : 'rgba(0,0,0,0.65)', color: featuredOrder ? 'var(--accent-text)' : 'rgba(255,255,255,0.8)', border: `1px solid ${featuredOrder ? 'var(--accent)' : 'rgba(255,255,255,0.2)'}`, backdropFilter: 'blur(4px)' }}
+                        >
+                          {featuredOrder ? `Affichée ${featuredOrder}` : '+ Afficher'}
+                        </button>
                         <button
                           onClick={() => setConfirmDelete(uploadedPhoto.filename)}
-                          className="absolute top-2 right-2 w-8 h-8 rounded-full bg-black/60 backdrop-blur-sm border border-white/20 text-white/70 hover:text-red-400 hover:bg-red-900/40 hover:border-red-400/50 opacity-0 group-hover:opacity-100 transition-all flex items-center justify-center text-sm"
-                        >
-                          X
-                        </button>
-                      )}
-                    </div>
-                  );
-                })
-              ) : (
+                          className="w-7 py-1 rounded text-[10px] transition-all"
+                          style={{ background: 'rgba(0,0,0,0.65)', color: 'rgba(255,255,255,0.7)', border: '1px solid rgba(255,255,255,0.2)', backdropFilter: 'blur(4px)' }}
+                          onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(180,40,40,0.7)'; (e.currentTarget as HTMLButtonElement).style.color = '#fff'; }}
+                          onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(0,0,0,0.65)'; (e.currentTarget as HTMLButtonElement).style.color = 'rgba(255,255,255,0.7)'; }}
+                        >✕</button>
+                      </div>
+                    )}
+                  </div>
+                );
+              }) : (
                 <div className="col-span-2 text-center py-12 italic" style={{ color: 'var(--text-muted)' }}>
                   No photos of us yet
                 </div>
@@ -469,13 +709,65 @@ const App: React.FC = () => {
                 />
               </label>
               {uploadLoading && (
-                <p className="text-center text-sm mt-2 animate-pulse" style={{ color: 'var(--accent)' }}>
-                  Uploading...
-                </p>
+                <div className="mt-3">
+                  <div className="flex justify-between text-xs mb-1" style={{ color: 'var(--text-muted)' }}>
+                    <span>Envoi en cours…</span>
+                    <span>{uploadProgress}%</span>
+                  </div>
+                  <div className="w-full h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--border-dim)' }}>
+                    <div
+                      className="h-full rounded-full transition-all duration-150"
+                      style={{ width: `${uploadProgress}%`, background: 'var(--accent)' }}
+                    />
+                  </div>
+                </div>
               )}
             </div>
           </div>
         </>
+      )}
+
+      {/* Global Smart Upload Button — visible on globe screen (no city selected) */}
+      {!selectedCity && !isResetting && (
+        <div className="absolute bottom-8 left-1/2 -translate-x-1/2 pointer-events-auto" style={{ zIndex: 100 }}>
+          <label
+            className="flex items-center gap-2 px-5 py-2.5 rounded-full cursor-pointer transition-all duration-[220ms] hover:scale-[1.04] active:scale-[0.97]"
+            style={{
+              background: 'var(--bg-surface)',
+              border: '1px solid var(--border-dim)',
+              color: 'var(--text-primary)',
+              fontFamily: 'Fredoka, sans-serif',
+              fontSize: '14px',
+              fontWeight: 500,
+              boxShadow: '0 4px 24px rgba(0,0,0,0.5)',
+            }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLLabelElement).style.borderColor = 'var(--accent)'; }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLLabelElement).style.borderColor = 'var(--border-dim)'; }}
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M8 11V3M4 7l4-4 4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+              <path d="M2 13h12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+            </svg>
+            Importer des photos
+            <input
+              type="file"
+              accept="image/*,.zip"
+              multiple
+              className="hidden"
+              onChange={handleGlobalFileInput}
+            />
+          </label>
+        </div>
+      )}
+
+      {/* Smart Upload Dialog */}
+      {smartUploadFiles && (
+        <SmartUploadDialog
+          files={smartUploadFiles}
+          cities={cities}
+          onConfirm={handleSmartUploadConfirm}
+          onCancel={() => setSmartUploadFiles(null)}
+        />
       )}
 
       {/* Delete Confirmation Dialog */}
